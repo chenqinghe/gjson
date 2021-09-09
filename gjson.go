@@ -3,6 +3,9 @@ package gjson
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -300,6 +303,139 @@ func (t Result) Get(path string) Result {
 	return Get(t.Raw, path)
 }
 
+type RawMessage []byte
+
+var rawMessageType = reflect.TypeOf(RawMessage{})
+
+func (t Result) Unmarshal(v interface{}) error {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+		return &json.InvalidUnmarshalError{Type: reflect.TypeOf(v)}
+	}
+
+	if !t.Exists() {
+		return nil
+	}
+
+	if rw, ok := v.(*RawMessage); ok {
+		*rw = RawMessage(t.Raw)
+		return nil
+	}
+
+	rt := reflect.TypeOf(v).Elem()
+	rv = rv.Elem()
+
+	switch rt.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		rv.SetInt(t.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		rv.SetUint(t.Uint())
+	case reflect.Float32, reflect.Float64:
+		rv.SetFloat(t.Float())
+	case reflect.String:
+		rv.SetString(t.String())
+	case reflect.Struct:
+		if !t.IsObject() {
+			return fmt.Errorf("cannot unmarshal %s into struct", t.Type.String())
+		}
+
+		for i := 0; i < rt.NumField(); i++ {
+
+			ft := rt.Field(i)
+			fv := rv.Field(i)
+
+			tag := ft.Tag.Get("json")
+			if tag == "-" {
+				continue
+			}
+			name := parseTag(tag)
+
+			typ := ft.Type
+			if ft.Type == rawMessageType {
+				fv.Set(reflect.ValueOf(RawMessage(t.Get(name).Raw)))
+				continue
+			} else if ft.Type.Kind() == reflect.Ptr && ft.Type.Elem() == rawMessageType {
+				msg := RawMessage(t.Get(name).Raw)
+				fv.Set(reflect.ValueOf(&msg))
+				continue
+			}
+
+			if typ.Kind() == reflect.Ptr {
+				typ = typ.Elem()
+			}
+			switch typ.Kind() {
+			case reflect.Array, reflect.Slice:
+				newv := reflect.MakeSlice(typ, len(t.Array()), len(t.Array()))
+				fv.Set(newv)
+				if err := t.Get(name).Unmarshal(fv.Addr().Interface()); err != nil {
+					return err
+				}
+			case reflect.Struct:
+				if ft.Anonymous {
+					if err := t.Unmarshal(fv.Addr().Interface()); err != nil {
+						return err
+					}
+				} else {
+					if err := t.Get(name).Unmarshal(fv.Addr().Interface()); err != nil {
+						return err
+					}
+				}
+
+			case reflect.Map:
+				newv := reflect.MakeMap(typ)
+				if err := t.Get(name).Unmarshal(newv.Interface()); err != nil {
+					return err
+				}
+				fv.Set(newv)
+			case reflect.Ptr:
+				if err := t.Get(name).Unmarshal(fv.Interface()); err != nil {
+					return err
+				}
+			default: // 基本类型
+				if err := t.Get(name).Unmarshal(fv.Addr().Interface()); err != nil {
+					return err
+				}
+			}
+		}
+	case reflect.Map:
+		if !t.IsObject() {
+			return fmt.Errorf("cannot unmarshal %s into map", t.Type.String())
+		}
+	case reflect.Slice, reflect.Array:
+		if !t.IsArray() {
+			return fmt.Errorf("cannot unmarshal %s into array/slice", t.Type.String())
+		}
+		arr := t.Array()
+		var length = len(arr)
+		if rt.Kind() == reflect.Array && rv.Len() < length {
+			length = rv.Len()
+		}
+
+		newv := reflect.MakeSlice(rt, length, length)
+		for i := 0; i < length; i++ {
+			if rt.Elem().Kind() == reflect.Ptr {
+				if err := arr[i].Unmarshal(newv.Index(i).Interface()); err != nil {
+					return err
+				}
+			} else {
+				if err := arr[i].Unmarshal(newv.Index(i).Addr().Interface()); err != nil {
+					return err
+				}
+			}
+		}
+		rv.Set(newv)
+	}
+
+	return nil
+}
+
+func parseTag(tag string) string {
+	if idx := strings.Index(tag, ","); idx != -1 {
+		return tag[:idx]
+	}
+	return tag
+}
+
 type arrayOrMapResult struct {
 	a  []Result
 	ai []interface{}
@@ -415,6 +551,15 @@ func (t Result) arrayOrMap(vc byte, valueize bool) (r arrayOrMapResult) {
 	}
 end:
 	return
+}
+
+func Unmarshal(data []byte, v interface{}) error {
+	r := ParseBytes(data)
+	if !r.Exists() {
+		return errors.New("invalid json data")
+	}
+
+	return r.Unmarshal(v)
 }
 
 // Parse parses the json and returns a result.

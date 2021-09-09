@@ -2184,3 +2184,42 @@ func TestIndexesMatchesRaw(t *testing.T) {
 	assert(t, Parse(exampleJSON[r.Indexes[0]:]).Get("first").String() == "Dale")
 	assert(t, Parse(exampleJSON[r.Indexes[1]:]).Get("first").String() == "Roger")
 }
+
+func TestUnmarshal(t *testing.T) {
+	var data = `
+{
+	"name":"bob",
+	"age":12,
+	"others":12314L,
+	"friends":[
+		{"name":"amy","age":14}
+	]
+	"street":"main street no.123"
+}
+
+`
+
+	type Friend struct {
+		Name string `json:"name"`
+		Age  int32  `json:"age"`
+	}
+
+	type Address struct {
+		Street string `json:"street"`
+	}
+
+	type Person struct {
+		Name    string     `json:"name"`
+		Age     int32      `json:"age"`
+		Others  RawMessage `json:"others"`
+		Friends []Friend   `json:"friends"`
+		Address
+	}
+
+	var p Person
+	if err := Unmarshal([]byte(data), &p); err != nil {
+		t.Fatal(err.Error())
+	}
+
+	t.Log(p, string(p.Others))
+}
