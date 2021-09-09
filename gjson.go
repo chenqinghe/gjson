@@ -303,9 +303,11 @@ func (t Result) Get(path string) Result {
 	return Get(t.Raw, path)
 }
 
-type RawMessage []byte
+func (t Result) Valid() bool {
+	return Valid(t.Raw)
+}
 
-var rawMessageType = reflect.TypeOf(RawMessage{})
+var resultType = reflect.TypeOf(Result{})
 
 func (t Result) Unmarshal(v interface{}) error {
 	rv := reflect.ValueOf(v)
@@ -317,8 +319,8 @@ func (t Result) Unmarshal(v interface{}) error {
 		return nil
 	}
 
-	if rw, ok := v.(*RawMessage); ok {
-		*rw = RawMessage(t.Raw)
+	if r, ok := v.(*Result); ok {
+		*r = t
 		return nil
 	}
 
@@ -351,12 +353,12 @@ func (t Result) Unmarshal(v interface{}) error {
 			name := parseTag(tag)
 
 			typ := ft.Type
-			if ft.Type == rawMessageType {
-				fv.Set(reflect.ValueOf(RawMessage(t.Get(name).Raw)))
+			if ft.Type == resultType {
+				fv.Set(reflect.ValueOf(t.Get(name)))
 				continue
-			} else if ft.Type.Kind() == reflect.Ptr && ft.Type.Elem() == rawMessageType {
-				msg := RawMessage(t.Get(name).Raw)
-				fv.Set(reflect.ValueOf(&msg))
+			} else if ft.Type.Kind() == reflect.Ptr && ft.Type.Elem() == resultType {
+				r := t.Get(name)
+				fv.Set(reflect.ValueOf(&r))
 				continue
 			}
 
@@ -391,7 +393,7 @@ func (t Result) Unmarshal(v interface{}) error {
 				if err := t.Get(name).Unmarshal(fv.Interface()); err != nil {
 					return err
 				}
-			default: // 基本类型
+			default: // fundamental types
 				if err := t.Get(name).Unmarshal(fv.Addr().Interface()); err != nil {
 					return err
 				}

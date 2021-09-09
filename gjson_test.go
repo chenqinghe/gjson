@@ -2209,10 +2209,10 @@ func TestUnmarshal(t *testing.T) {
 	}
 
 	type Person struct {
-		Name    string     `json:"name"`
-		Age     int32      `json:"age"`
-		Others  RawMessage `json:"others"`
-		Friends []Friend   `json:"friends"`
+		Name    string   `json:"name"`
+		Age     int32    `json:"age"`
+		Others  Result   `json:"others"`
+		Friends []Friend `json:"friends"`
 		Address
 	}
 
@@ -2221,5 +2221,5 @@ func TestUnmarshal(t *testing.T) {
 		t.Fatal(err.Error())
 	}
 
-	t.Log(p, string(p.Others))
+	t.Log(p, p.Others.Raw)
 }
